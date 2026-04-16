@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.rate_limit import rate_limit
+from app.core.redis_client import get_redis
 from app.core.security import get_current_user, require_roles
 from app.models.user import User, UserRole
 from app.services.storage import (
@@ -71,6 +72,14 @@ class PresignUploadResponse(BaseModel):
 
 class PresignDownloadResponse(BaseModel):
     url: str
+
+
+class PresignDownloadBatchRequest(BaseModel):
+    keys: list[str]
+
+
+class PresignDownloadBatchResponse(BaseModel):
+    urls: dict[str, str]
 
 
 class ListEntry(BaseModel):
@@ -215,6 +224,79 @@ def presign_sales_download(
         raise HTTPException(status_code=400, detail="invalid key")
     url = presign_get(object_key=k)
     return PresignDownloadResponse(url=url)
+
+
+@router.post("/presign-download-batch", response_model=PresignDownloadBatchResponse)
+def presign_sales_download_batch(
+    body: PresignDownloadBatchRequest,
+    _: User = Depends(get_current_user),
+    __: object = rate_limit(key_prefix="sales_files_presign_get_batch", limit=240, window_seconds=60),
+):
+    keys_in = body.keys or []
+    keys: list[str] = []
+    for raw in keys_in:
+        k = str(raw or "").strip().lstrip("/")
+        if not k:
+            continue
+        if not k.startswith("sales/photos/") and not k.startswith("sales/catalogs/"):
+            raise HTTPException(status_code=400, detail="invalid key")
+        keys.append(k)
+
+    # Bound payload to keep this endpoint lightweight.
+    keys = list(dict.fromkeys(keys))
+    if not keys:
+        return PresignDownloadBatchResponse(urls={})
+    if len(keys) > 200:
+        raise HTTPException(status_code=400, detail="too many keys")
+
+    # Cache presigned URLs briefly to avoid spamming the app with per-file presign.
+    # In production presign_get is capped at <=300s, so cache <=240s.
+    ttl = 240
+    r = None
+    try:
+        r = get_redis()
+    except Exception:
+        r = None
+
+    cache_keys = [f"sales:presign:{k}" for k in keys]
+    cached: list[str | None] = []
+    if r is not None:
+        try:
+            cached = r.mget(cache_keys)
+        except Exception:
+            cached = []
+
+    out: dict[str, str] = {}
+    missing: list[str] = []
+    if cached and len(cached) == len(keys):
+        for k, v in zip(keys, cached):
+            if v:
+                out[k] = str(v)
+            else:
+                missing.append(k)
+    else:
+        missing = keys
+
+    if missing:
+        for k in missing:
+            try:
+                out[k] = presign_get(object_key=k)
+            except Exception:
+                # best-effort: skip
+                continue
+
+        if r is not None:
+            try:
+                pipe = r.pipeline()
+                for k in missing:
+                    u = out.get(k)
+                    if u:
+                        pipe.setex(f"sales:presign:{k}", ttl, u)
+                pipe.execute()
+            except Exception:
+                pass
+
+    return PresignDownloadBatchResponse(urls=out)
 
 
 @router.post("/presign-upload", response_model=PresignUploadResponse)

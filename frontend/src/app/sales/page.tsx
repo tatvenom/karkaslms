@@ -115,6 +115,13 @@ async function salesFilesPresignDownload(key: string) {
   return apiFetch<{ url: string }>(`/sales-files/presign-download?${qs.toString()}`);
 }
 
+async function salesFilesPresignDownloadBatch(keys: string[]) {
+  return apiFetch<{ urls: Record<string, string> }>(`/sales-files/presign-download-batch`, {
+    method: "POST",
+    body: JSON.stringify({ keys }),
+  } as any);
+}
+
 async function salesFilesPresignUpload(args: { section: SalesFilesSection; path: string[]; filename: string; contentType: string }) {
   return apiFetch<{ key: string; upload_url: string }>("/sales-files/presign-upload", {
     method: "POST",
@@ -213,6 +220,9 @@ function SalesExplorer({
 
   const thumbsCacheRef = useRef<Map<string, string>>(new Map());
   const thumbsInFlightRef = useRef<Map<string, Promise<string>>>(new Map());
+  const thumbsBatchQueueRef = useRef<Set<string>>(new Set());
+  const thumbsBatchTimerRef = useRef<number | null>(null);
+  const thumbsBatchInFlightRef = useRef<Promise<void> | null>(null);
   const [thumbUrlByKey, setThumbUrlByKey] = useState<Record<string, string>>({});
   const [thumbLoadingByKey, setThumbLoadingByKey] = useState<Record<string, boolean>>({});
 
@@ -280,30 +290,76 @@ function SalesExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
+  const flushThumbBatch = async () => {
+    if (thumbsBatchInFlightRef.current) {
+      await thumbsBatchInFlightRef.current;
+      return;
+    }
+
+    const keys = Array.from(thumbsBatchQueueRef.current);
+    thumbsBatchQueueRef.current.clear();
+    if (!keys.length) return;
+
+    const job = (async () => {
+      try {
+        const r = await salesFilesPresignDownloadBatch(keys);
+        const urls = (r as any)?.urls || {};
+        for (const k of keys) {
+          const u = String(urls?.[k] || "").trim();
+          if (u) {
+            thumbsCacheRef.current.set(k, u);
+          }
+        }
+        setThumbUrlByKey((prev) => {
+          const next = { ...prev };
+          for (const k of keys) {
+            const u = String(urls?.[k] || "").trim();
+            if (u) next[k] = u;
+          }
+          return next;
+        });
+      } catch {
+        // ignore
+      } finally {
+        setThumbLoadingByKey((prev) => {
+          const next = { ...prev };
+          for (const k of keys) next[k] = false;
+          return next;
+        });
+        thumbsBatchInFlightRef.current = null;
+      }
+    })();
+
+    thumbsBatchInFlightRef.current = job;
+    await job;
+  };
+
   const ensureThumbUrl = async (key: string): Promise<string> => {
     const k = String(key || "").trim();
     if (!k) return "";
+
     const cached = thumbsCacheRef.current.get(k);
     if (cached) return cached;
 
     const inflight = thumbsInFlightRef.current.get(k);
     if (inflight) return inflight;
 
+    setThumbLoadingByKey((prev) => ({ ...prev, [k]: true }));
+    thumbsBatchQueueRef.current.add(k);
+    if (thumbsBatchTimerRef.current) {
+      window.clearTimeout(thumbsBatchTimerRef.current);
+    }
+    thumbsBatchTimerRef.current = window.setTimeout(() => {
+      thumbsBatchTimerRef.current = null;
+      void flushThumbBatch();
+    }, 40);
+
     const p = (async () => {
       try {
-        setThumbLoadingByKey((prev) => ({ ...prev, [k]: true }));
-        const r = await salesFilesPresignDownload(k);
-        const u = String((r as any)?.url || "").trim();
-        if (u) {
-          thumbsCacheRef.current.set(k, u);
-          setThumbUrlByKey((prev) => ({ ...prev, [k]: u }));
-        }
-        return u;
-      } catch {
-        return "";
+        await flushThumbBatch();
+        return String(thumbsCacheRef.current.get(k) || "");
       } finally {
         thumbsInFlightRef.current.delete(k);
-        setThumbLoadingByKey((prev) => ({ ...prev, [k]: false }));
       }
     })();
 
