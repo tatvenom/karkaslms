@@ -203,6 +203,10 @@ function SalesExplorer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const entriesCacheRef = useRef<Map<string, SalesFilesEntry[]>>(new Map());
 
+  const thumbsCacheRef = useRef<Map<string, string>>(new Map());
+  const [thumbUrlByKey, setThumbUrlByKey] = useState<Record<string, string>>({});
+  const [thumbLoadingByKey, setThumbLoadingByKey] = useState<Record<string, boolean>>({});
+
   const [lightbox, setLightbox] = useState<{
     open: boolean;
     index: number;
@@ -225,6 +229,10 @@ function SalesExplorer({
 
   const folders = useMemo(() => entries.filter((e) => e.kind === "folder"), [entries]);
   const files = useMemo(() => entries.filter((e) => e.kind === "file"), [entries]);
+
+  const imageFiles = useMemo(() => {
+    return (files || []).filter((f) => isImageUrl(String(f.title || "")) && String(f.key || "").trim());
+  }, [files]);
 
   const breadcrumbs = useMemo(() => {
     if (!path.length) return ["/"];
@@ -266,6 +274,55 @@ function SalesExplorer({
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (mode !== "files" || !section) return;
+    if (!imageFiles.length) return;
+
+    let canceled = false;
+
+    const run = async () => {
+      const pending = imageFiles
+        .map((f) => String(f.key || "").trim())
+        .filter(Boolean)
+        .filter((k) => !thumbsCacheRef.current.get(k));
+      if (!pending.length) return;
+
+      const concurrency = 4;
+      let idx = 0;
+
+      const worker = async () => {
+        while (idx < pending.length) {
+          const k = pending[idx++];
+          if (!k || canceled) return;
+          try {
+            setThumbLoadingByKey((prev) => ({ ...prev, [k]: true }));
+            const r = await salesFilesPresignDownload(k);
+            const u = String((r as any)?.url || "").trim();
+            if (!u) continue;
+            thumbsCacheRef.current.set(k, u);
+            if (!canceled) {
+              setThumbUrlByKey((prev) => ({ ...prev, [k]: u }));
+            }
+          } catch {
+            // ignore
+          } finally {
+            if (!canceled) {
+              setThumbLoadingByKey((prev) => ({ ...prev, [k]: false }));
+            }
+          }
+        }
+      };
+
+      await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }).map(() => worker()));
+    };
+
+    void run();
+    return () => {
+      canceled = true;
+    };
+  }, [open, mode, section, imageFiles]);
 
   useEffect(() => {
     if (!lightbox.open) return;
@@ -557,9 +614,28 @@ function SalesExplorer({
                     onClick={() => void openFile(f)}
                     className="group flex-1 rounded-2xl border border-zinc-200 bg-white/80 p-4 hover:bg-white transition text-left"
                   >
-                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Файл</div>
-                    <div className="mt-1 text-sm font-bold text-zinc-950 break-words">{f.title}</div>
-                    <div className="mt-2 text-[10px] font-black uppercase tracking-widest text-[#229ED9]">Открыть ↗</div>
+                    <div className="flex items-start gap-3">
+                      {isImageUrl(String(f.title || "")) ? (
+                        <div className="h-16 w-16 shrink-0 rounded-xl border border-zinc-200 bg-zinc-50 overflow-hidden">
+                          {(() => {
+                            const k = String(f.key || "").trim();
+                            const u = k ? (thumbUrlByKey[k] || thumbsCacheRef.current.get(k) || "") : "";
+                            const busy = k ? Boolean(thumbLoadingByKey[k]) : false;
+                            if (u) {
+                              return <img src={u} alt="" className="h-full w-full object-cover" />;
+                            }
+                            return (
+                              <div className={cn("h-full w-full", busy ? "animate-pulse bg-zinc-200" : "bg-zinc-100")} />
+                            );
+                          })()}
+                        </div>
+                      ) : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Файл</div>
+                        <div className="mt-1 text-sm font-bold text-zinc-950 break-words">{f.title}</div>
+                        <div className="mt-2 text-[10px] font-black uppercase tracking-widest text-[#229ED9]">Открыть ↗</div>
+                      </div>
+                    </div>
                   </button>
                   {editable ? (
                     <Button
