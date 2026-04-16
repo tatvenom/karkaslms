@@ -960,79 +960,92 @@ export default function SalesPage() {
         </div>
         <h1 className="text-5xl font-black tracking-tighter text-zinc-950 uppercase leading-none">Материалы</h1>
 
-        {linksData.blocks
-          .filter((b) => b.kind === "links" && (b.title || "").trim().length)
-          .filter((b) => {
-            const t = (b.title || "").toLowerCase();
-            return t.includes("тг") || t.includes("помощ");
-          })
-          .map((b) => (
-            <div key={b.id} className="mt-8">
-              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-2">{b.title}</div>
-              <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
-                {(b.kind === "links" ? b.links : []).length ? (
-                  (b.kind === "links" ? b.links : []).map((l) => (
-                    <Button
-                      key={l.url}
-                      variant="outline"
-                      className="h-10 rounded-full border-zinc-200 bg-white/70 hover:bg-white text-zinc-950 px-4 shrink-0"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => openExternalLink({ url: l.url, title: l.title, source: b.title })}
-                        className="flex items-center gap-2"
-                      >
-                        <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">{l.title}</span>
-                        <span className="text-[11px] font-black text-[#229ED9]">↗</span>
-                      </button>
-                    </Button>
-                  ))
-                ) : (
-                  <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Нет ссылок</div>
-                )}
-              </div>
+        {linksLoading ? (
+          <div className="mt-10 flex items-center justify-center">
+            <div className="flex items-center gap-3 rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md px-6 py-4 shadow-2xl shadow-zinc-950/10">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900" />
+              <div className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-600">Загрузка...</div>
             </div>
-          ))}
+          </div>
+        ) : null}
 
-        <div className="mt-10 grid gap-6 lg:grid-cols-4">
-          <button
-            type="button"
-            onClick={() => setPhotosOpen(true)}
-            className="group text-left rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md p-7 shadow-2xl shadow-zinc-950/10 hover:bg-white transition"
-          >
-            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Блок</div>
-            <div className="mt-2 text-2xl font-black tracking-tighter text-zinc-950 uppercase">Фотографии</div>
-            <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Открыть проводник →</div>
-          </button>
+        {!linksLoading
+          ? linksData.blocks
+              .filter((b) => b.kind === "links" && (b.title || "").trim().length)
+              .filter((b) => {
+                const t = (b.title || "").toLowerCase();
+                return t.includes("тг") || t.includes("помощ");
+              })
+              .map((b) => (
+                <div key={b.id} className="mt-8">
+                  <div className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-2">{b.title}</div>
+                  <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
+                    {(b.kind === "links" ? b.links : []).length ? (
+                      (b.kind === "links" ? b.links : []).map((l) => (
+                        <Button
+                          key={l.url}
+                          variant="outline"
+                          className="h-10 rounded-full border-zinc-200 bg-white/70 hover:bg-white text-zinc-950 px-4 shrink-0"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => openExternalLink({ url: l.url, title: l.title, source: b.title })}
+                            className="flex items-center gap-2"
+                          >
+                            <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">{l.title}</span>
+                            <span className="text-[11px] font-black text-[#229ED9]">↗</span>
+                          </button>
+                        </Button>
+                      ))
+                    ) : (
+                      <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Нет ссылок</div>
+                    )}
+                  </div>
+                </div>
+              ))
+          : null}
 
-          <button
-            type="button"
-            onClick={() => setCatalogsOpen(true)}
-            className="group text-left rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md p-7 shadow-2xl shadow-zinc-950/10 hover:bg-white transition"
-          >
-            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Блок</div>
-            <div className="mt-2 text-2xl font-black tracking-tighter text-zinc-950 uppercase">Каталоги</div>
-            <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Открыть проводник →</div>
-          </button>
+        {!linksLoading ? (
+          <div className="mt-10 grid gap-6 lg:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => setPhotosOpen(true)}
+              className="group text-left rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md p-7 shadow-2xl shadow-zinc-950/10 hover:bg-white transition"
+            >
+              <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Блок</div>
+              <div className="mt-2 text-2xl font-black tracking-tighter text-zinc-950 uppercase">Фотографии</div>
+              <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Открыть проводник →</div>
+            </button>
 
-          {linksData.blocks
-            .filter((b) => {
-              const t = (b.title || "").toLowerCase();
-              return !(t.includes("тг") || t.includes("помощ"));
-            })
-            .map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => setOpenBlockId(b.id)}
-                className="group text-left rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md p-7 shadow-2xl shadow-zinc-950/10 hover:bg-white transition"
-              >
-                <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Блок</div>
-                <div className="mt-2 text-2xl font-black tracking-tighter text-zinc-950 uppercase">{b.title}</div>
-                <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Открыть →</div>
-              </button>
-            ))}
-        </div>
+            <button
+              type="button"
+              onClick={() => setCatalogsOpen(true)}
+              className="group text-left rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md p-7 shadow-2xl shadow-zinc-950/10 hover:bg-white transition"
+            >
+              <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Блок</div>
+              <div className="mt-2 text-2xl font-black tracking-tighter text-zinc-950 uppercase">Каталоги</div>
+              <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Открыть проводник →</div>
+            </button>
+
+            {linksData.blocks
+              .filter((b) => {
+                const t = (b.title || "").toLowerCase();
+                return !(t.includes("тг") || t.includes("помощ"));
+              })
+              .map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setOpenBlockId(b.id)}
+                  className="group text-left rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md p-7 shadow-2xl shadow-zinc-950/10 hover:bg-white transition"
+                >
+                  <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Блок</div>
+                  <div className="mt-2 text-2xl font-black tracking-tighter text-zinc-950 uppercase">{b.title}</div>
+                  <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Открыть →</div>
+                </button>
+              ))}
+          </div>
+        ) : null}
 
         <SalesExplorer title="Фотографии" open={photosOpen} onClose={() => setPhotosOpen(false)} mode="files" section="photos" editable={canEdit && editMode} />
 

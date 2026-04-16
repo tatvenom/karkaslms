@@ -218,8 +218,19 @@ def start_quiz(
     is_final_quiz = _is_final_quiz(quiz)
 
     # Product rule: quiz is available only after the learner explicitly confirms reading the submodule.
+    # Also: lessons can have a quiz record but be marked as materials-only (requires_quiz=False).
+    # In that case, the quiz must be treated as disabled for learners.
     sub = db.scalar(select(Submodule).where(Submodule.quiz_id == quiz.id))
     if sub is not None:
+        try:
+            if not bool(getattr(sub, "requires_quiz", True)):
+                raise HTTPException(status_code=403, detail="quiz disabled for this lesson")
+        except HTTPException:
+            raise
+        except Exception:
+            # If anything goes wrong reading the flag, fail open (legacy behavior).
+            pass
+
         # Check if this is the final submodule of the module
         is_final = db.scalar(
             select(Submodule.id)

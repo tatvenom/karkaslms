@@ -566,6 +566,8 @@ export function ModulesTab(props: ModulesTabProps) {
                       const questionTotal = q ? Number(q.total || 0) : 0;
                       const isTestCapable = !isFolderLesson && hasQuizId && questionTotal > 0;
                       const isFileLesson = !isFolderLesson && !isTestCapable;
+                      const canToggleQuiz = !isFolderLesson && hasQuizId;
+                      const canEnableQuiz = !isFolderLesson && hasQuizId && questionTotal > 0;
                       const ok = q ? !!q.ok : false;
                       const needs = q ? Number(q.needs_regen || 0) : 0;
                       const total = q ? Number(q.total || 0) : 0;
@@ -637,7 +639,7 @@ export function ModulesTab(props: ModulesTabProps) {
                                     ФАЙЛОВЫЙ
                                   </div>
                                 ) : null}
-                                {!isFolderLesson && isTestCapable ? (
+                                {canToggleQuiz ? (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -650,7 +652,7 @@ export function ModulesTab(props: ModulesTabProps) {
                                         setSelectedQuizId("");
                                       }
                                     }}
-                                    disabled={!hasQuizId}
+                                    disabled={!hasQuizId || (!canEnableQuiz && !isQuizLesson)}
                                     className={
                                       "inline-flex items-center rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-widest transition hover:bg-white active:scale-95 " +
                                       (isQuizLesson
@@ -662,7 +664,9 @@ export function ModulesTab(props: ModulesTabProps) {
                                         ? "У урока нет quiz_id"
                                         : isQuizLesson
                                           ? "Тест обязателен (нажмите чтобы выключить)"
-                                          : "Тест выключен (нажмите чтобы включить)"
+                                          : !canEnableQuiz
+                                            ? "Нельзя включить тест: нет вопросов"
+                                            : "Тест выключен (нажмите чтобы включить)"
                                     }
                                   >
                                     ТЕСТ: {!hasQuizId ? "НЕТ" : isQuizLesson ? "ВКЛ" : "ВЫКЛ"}

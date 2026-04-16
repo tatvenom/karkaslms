@@ -1170,6 +1170,7 @@ export default function SubmodulePage() {
   }, [submoduleId]);
 
   const primaryViewerAsset = useMemo<AssetLike | null>(() => {
+    if (isFileLesson) return null;
     if (!primaryLessonAsset) return null;
     const nm = String((primaryLessonAsset as any)?.original_filename || (primaryLessonAsset as any)?.title || "");
     const mime = String((primaryLessonAsset as any)?.mime_type || "");
@@ -1177,9 +1178,13 @@ export default function SubmodulePage() {
     if (isPdfByNameOrMime(nm, mime)) return primaryLessonAsset;
     if (isOfficeViewableByNameOrMime(nm, mime)) return primaryLessonAsset;
     return null;
-  }, [primaryLessonAsset]);
+  }, [isFileLesson, primaryLessonAsset]);
+
+  const isPrimaryViewerPending = Boolean(primaryViewerAsset && !primaryViewerUrl);
+  const isInlineViewerPending = Boolean(isFileLesson && primaryLessonAsset && !inlineUrl);
 
   useEffect(() => {
+    if (isFileLesson) return;
     if (!primaryViewerAsset) return;
     const aid = String((primaryViewerAsset as any)?.asset_id || "").trim();
     if (!aid) return;
@@ -1213,7 +1218,7 @@ export default function SubmodulePage() {
     return () => {
       canceled = true;
     };
-  }, [primaryViewerAsset]);
+  }, [isFileLesson, primaryViewerAsset]);
 
   const hideLessonText = Boolean(primaryViewerUrl && primaryViewerKind);
 
@@ -1891,6 +1896,16 @@ export default function SubmodulePage() {
 
                 
                 <div className="max-w-none break-words hyphens-auto text-zinc-700 text-[17px] leading-relaxed">
+                  {isInlineViewerPending ? (
+                    <div className="not-prose mb-8 overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-sm">
+                      <div className="flex items-center justify-center p-8">
+                        <div className="flex items-center gap-3 rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md px-6 py-4 shadow-2xl shadow-zinc-950/10">
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900" />
+                          <div className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-600">Загрузка...</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   {isFileLesson ? null : hideLessonText ? null : (
                     <div className="not-prose mb-6 rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="flex flex-wrap items-center gap-2">
@@ -2033,7 +2048,18 @@ export default function SubmodulePage() {
                     </div>
                   ) : null}
 
-                  {isFileLesson ? null : hideLessonText ? null : (
+                  {!isFileLesson && isPrimaryViewerPending ? (
+                    <div className="not-prose mb-8 overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-sm">
+                      <div className="flex items-center justify-center p-8">
+                        <div className="flex items-center gap-3 rounded-[28px] border border-zinc-200 bg-white/70 backdrop-blur-md px-6 py-4 shadow-2xl shadow-zinc-950/10">
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900" />
+                          <div className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-600">Загрузка...</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {isFileLesson ? null : hideLessonText || isPrimaryViewerPending ? null : (
                     <div>
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
