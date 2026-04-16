@@ -70,6 +70,14 @@ function isImageUrl(url: string): boolean {
   );
 }
 
+function isVideoUrl(url: string): boolean {
+  const clean = String(url || "")
+    .split("?")[0]
+    .split("#")[0]
+    .toLowerCase();
+  return clean.endsWith(".mp4") || clean.endsWith(".mov") || clean.endsWith(".m4v") || clean.endsWith(".webm");
+}
+
 function isPdfName(name: string): boolean {
   return String(name || "")
     .split("?")[0]
@@ -204,6 +212,7 @@ function SalesExplorer({
   const entriesCacheRef = useRef<Map<string, SalesFilesEntry[]>>(new Map());
 
   const thumbsCacheRef = useRef<Map<string, string>>(new Map());
+  const thumbsInFlightRef = useRef<Map<string, Promise<string>>>(new Map());
   const [thumbUrlByKey, setThumbUrlByKey] = useState<Record<string, string>>({});
   const [thumbLoadingByKey, setThumbLoadingByKey] = useState<Record<string, boolean>>({});
 
@@ -229,10 +238,6 @@ function SalesExplorer({
 
   const folders = useMemo(() => entries.filter((e) => e.kind === "folder"), [entries]);
   const files = useMemo(() => entries.filter((e) => e.kind === "file"), [entries]);
-
-  const imageFiles = useMemo(() => {
-    return (files || []).filter((f) => isImageUrl(String(f.title || "")) && String(f.key || "").trim());
-  }, [files]);
 
   const breadcrumbs = useMemo(() => {
     if (!path.length) return ["/"];
@@ -275,54 +280,36 @@ function SalesExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
-  useEffect(() => {
-    if (!open) return;
-    if (mode !== "files" || !section) return;
-    if (!imageFiles.length) return;
+  const ensureThumbUrl = async (key: string): Promise<string> => {
+    const k = String(key || "").trim();
+    if (!k) return "";
+    const cached = thumbsCacheRef.current.get(k);
+    if (cached) return cached;
 
-    let canceled = false;
+    const inflight = thumbsInFlightRef.current.get(k);
+    if (inflight) return inflight;
 
-    const run = async () => {
-      const pending = imageFiles
-        .map((f) => String(f.key || "").trim())
-        .filter(Boolean)
-        .filter((k) => !thumbsCacheRef.current.get(k));
-      if (!pending.length) return;
-
-      const concurrency = 4;
-      let idx = 0;
-
-      const worker = async () => {
-        while (idx < pending.length) {
-          const k = pending[idx++];
-          if (!k || canceled) return;
-          try {
-            setThumbLoadingByKey((prev) => ({ ...prev, [k]: true }));
-            const r = await salesFilesPresignDownload(k);
-            const u = String((r as any)?.url || "").trim();
-            if (!u) continue;
-            thumbsCacheRef.current.set(k, u);
-            if (!canceled) {
-              setThumbUrlByKey((prev) => ({ ...prev, [k]: u }));
-            }
-          } catch {
-            // ignore
-          } finally {
-            if (!canceled) {
-              setThumbLoadingByKey((prev) => ({ ...prev, [k]: false }));
-            }
-          }
+    const p = (async () => {
+      try {
+        setThumbLoadingByKey((prev) => ({ ...prev, [k]: true }));
+        const r = await salesFilesPresignDownload(k);
+        const u = String((r as any)?.url || "").trim();
+        if (u) {
+          thumbsCacheRef.current.set(k, u);
+          setThumbUrlByKey((prev) => ({ ...prev, [k]: u }));
         }
-      };
+        return u;
+      } catch {
+        return "";
+      } finally {
+        thumbsInFlightRef.current.delete(k);
+        setThumbLoadingByKey((prev) => ({ ...prev, [k]: false }));
+      }
+    })();
 
-      await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }).map(() => worker()));
-    };
-
-    void run();
-    return () => {
-      canceled = true;
-    };
-  }, [open, mode, section, imageFiles]);
+    thumbsInFlightRef.current.set(k, p);
+    return p;
+  };
 
   useEffect(() => {
     if (!lightbox.open) return;
@@ -402,8 +389,9 @@ function SalesExplorer({
       const presigned = await Promise.all(
         imageCandidates.map(async (f) => {
           try {
-            const r = await salesFilesPresignDownload(f.key);
-            const url = String(r.url || "");
+            const url =
+              String(thumbUrlByKey[String(f.key || "").trim()] || thumbsCacheRef.current.get(String(f.key || "").trim()) || "") ||
+              (await ensureThumbUrl(f.key));
             return { title: f.title, key: f.key, url };
           } catch {
             return { title: f.title, key: f.key, url: "" };
@@ -429,6 +417,68 @@ function SalesExplorer({
     const url = String(r.url || "");
     if (!url) return;
     setFileViewer({ open: true, title: f.title, url, name: f.title });
+  };
+
+  const FileThumb = ({ f }: { f: SalesFilesEntry }) => {
+    const ref = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+      const k = String(f.key || "").trim();
+      const isMedia = isImageUrl(String(f.title || "")) || isVideoUrl(String(f.title || ""));
+      if (!open || mode !== "files" || !section) return;
+      if (!k || !isMedia) return;
+      if (thumbsCacheRef.current.get(k)) return;
+
+      const el = ref.current;
+      if (!el) return;
+      if (typeof IntersectionObserver === "undefined") {
+        void ensureThumbUrl(k);
+        return;
+      }
+
+      const obs = new IntersectionObserver(
+        (entries) => {
+          const first = entries[0];
+          if (!first) return;
+          if (first.isIntersecting) {
+            void ensureThumbUrl(k);
+            obs.disconnect();
+          }
+        },
+        { root: null, rootMargin: "250px", threshold: 0.01 }
+      );
+
+      obs.observe(el);
+      return () => obs.disconnect();
+    }, [f.key, f.title, open]);
+
+    const k = String(f.key || "").trim();
+    const u = k ? (thumbUrlByKey[k] || thumbsCacheRef.current.get(k) || "") : "";
+    const busy = k ? Boolean(thumbLoadingByKey[k]) : false;
+    const isImg = isImageUrl(String(f.title || ""));
+    const isVid = isVideoUrl(String(f.title || ""));
+
+    if (!isImg && !isVid) return null;
+
+    return (
+      <div ref={ref} className="h-16 w-16 shrink-0 rounded-xl border border-zinc-200 bg-zinc-50 overflow-hidden">
+        {u ? (
+          isImg ? (
+            <img src={u} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <video
+              src={u}
+              className="h-full w-full object-cover"
+              preload="metadata"
+              muted
+              playsInline
+            />
+          )
+        ) : (
+          <div className={cn("h-full w-full", busy ? "animate-pulse bg-zinc-200" : "bg-zinc-100")} />
+        )}
+      </div>
+    );
   };
 
   const onUploadPick = async (filesList: FileList | null) => {
@@ -615,21 +665,7 @@ function SalesExplorer({
                     className="group flex-1 rounded-2xl border border-zinc-200 bg-white/80 p-4 hover:bg-white transition text-left"
                   >
                     <div className="flex items-start gap-3">
-                      {isImageUrl(String(f.title || "")) ? (
-                        <div className="h-16 w-16 shrink-0 rounded-xl border border-zinc-200 bg-zinc-50 overflow-hidden">
-                          {(() => {
-                            const k = String(f.key || "").trim();
-                            const u = k ? (thumbUrlByKey[k] || thumbsCacheRef.current.get(k) || "") : "";
-                            const busy = k ? Boolean(thumbLoadingByKey[k]) : false;
-                            if (u) {
-                              return <img src={u} alt="" className="h-full w-full object-cover" />;
-                            }
-                            return (
-                              <div className={cn("h-full w-full", busy ? "animate-pulse bg-zinc-200" : "bg-zinc-100")} />
-                            );
-                          })()}
-                        </div>
-                      ) : null}
+                      <FileThumb f={f} />
                       <div className="min-w-0 flex-1">
                         <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Файл</div>
                         <div className="mt-1 text-sm font-bold text-zinc-950 break-words">{f.title}</div>
